@@ -1,0 +1,8 @@
+version: "3.8"
+
+services:
+    app:
+        image: team-dumpster-fire/lil-dumpster:latest
+        build: .
+        environment:
+            DISCORD_TOKEN: ${DISCORD_TOKEN}
