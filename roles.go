@@ -23,7 +23,9 @@ type (
 
 var emojiRoleMap = map[string]role{
 	"among_us":       {Name: "Imposter", Game: "Among Us"},
-	"destiny":        {Name: "Guardian", Game: "Destiny / Destiny 2"},
+	"borderlands":    {Name: "Vault Hunter", Game: "Borderlands"},
+	"destiny":        {Name: "Guardian", Game: "Destiny"},
+	"jackbox":        {Name: "Jackal", Game: "Jackbox Party Pack"},
 	"sea_of_thieves": {Name: "Pirate", Game: "Sea of Thieves"},
 	"speedrunners":   {Name: "Speed Runner", Game: "SpeedRunners"},
 }
