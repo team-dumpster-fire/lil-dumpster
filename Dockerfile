@@ -18,5 +18,6 @@ RUN apk add --no-cache ca-certificates
 
 # Add pre-built application
 COPY --from=0 /app/main /app
-
 ENTRYPOINT [ "/app" ]
+
+LABEL org.opencontainers.image.source https://github.com/team-dumpster-fire/lil-dumpster
