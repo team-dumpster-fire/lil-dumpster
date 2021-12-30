@@ -12,9 +12,8 @@ import (
 
 func main() {
 	// Handle signal interrupts.
-	var cancel func()
-	ctx, cancel := context.WithCancel(context.Background())
-	go signals(cancel)
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, os.Interrupt)
+	defer cancel()
 
 	token := os.Getenv("DISCORD_TOKEN")
 	if token == "" {
@@ -42,11 +41,4 @@ func main() {
 
 	// Wait until the application is shutting down
 	<-ctx.Done()
-}
-
-func signals(cancel func()) {
-	defer cancel()
-	sig := make(chan os.Signal, 1)
-	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM, os.Interrupt)
-	<-sig
 }
