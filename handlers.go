@@ -11,7 +11,9 @@ const helpText = `Hello there! I'm a happy helpful dumpster fire ready to assist
 `
 
 func handleReady(s *discordgo.Session, event *discordgo.Ready) {
-	s.UpdateListeningStatus("!lil-dumpster")
+	if err := s.UpdateListeningStatus("!lil-dumpster"); err != nil {
+		log.Println("Failed to update listening status:", err)
+	}
 
 	for _, g := range event.Guilds {
 		if err := manageRoles(s, g); err != nil {
@@ -34,7 +36,9 @@ func handleCommands(s *discordgo.Session, m *discordgo.MessageCreate) {
 
 	switch args[0] {
 	default:
-		s.ChannelMessageSend(m.ChannelID, helpText)
+		if _, err := s.ChannelMessageSend(m.ChannelID, helpText); err != nil {
+			log.Println("Failed to send channel message:", err)
+		}
 	}
 }
 
