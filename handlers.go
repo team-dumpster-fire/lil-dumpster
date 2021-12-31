@@ -39,7 +39,6 @@ func handleCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 					}
 				}
 			default:
-				log.Println("Command: ", i.ApplicationCommandData().ID)
 				cmd.Handler(s, i)
 			}
 		}
