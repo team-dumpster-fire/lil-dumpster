@@ -166,6 +166,86 @@ var applicationCommands = []applicationCommand{
 			}
 		},
 	},
+	{
+		Command: &discordgo.ApplicationCommand{
+			Name:        "poll",
+			Description: "Submit a poll to the channel",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "choices",
+					Description: "Comma-separated list of choices for presenting to users",
+					Required:    true,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "prompt",
+					Description: "Question to ask users",
+					Required:    false,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionBoolean,
+					Name:        "draft",
+					Description: "If true, will only display the poll to you so that you may review the output",
+					Required:    false,
+				},
+			},
+		},
+		Handler: func(s *discordgo.Session, i *discordgo.InteractionCreate) {
+			emojimap := map[int]string{
+				1: "one",
+				2: "two",
+				3: "three",
+				4: "four",
+				5: "five",
+				6: "six",
+				7: "seven",
+				8: "eight",
+				9: "nine",
+			}
+
+			prompt := "Poll:"
+			var choicesString string
+			var flags uint64
+			for _, opt := range i.ApplicationCommandData().Options {
+				switch opt.Name {
+				case "choices":
+					choicesString = opt.StringValue()
+				case "prompt":
+					prompt = strings.TrimSpace(opt.StringValue())
+				case "draft":
+					if opt.BoolValue() {
+						flags = 1 << 6 // Ephemeral, private
+					}
+				}
+			}
+
+			// Build the poll string
+			poll := strings.Builder{}
+			poll.WriteString(prompt + "\n")
+			for i, choice := range strings.Split(choicesString, ",") {
+				if _, ok := emojimap[i+1]; !ok {
+					break
+				}
+
+				poll.WriteString(fmt.Sprintf(":%s: %s\n", emojimap[i+1], strings.TrimSpace(choice)))
+			}
+
+			// Send the poll!
+			err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+				Type: discordgo.InteractionResponseChannelMessageWithSource,
+				Data: &discordgo.InteractionResponseData{
+					Content: poll.String(),
+					Flags:   flags,
+				},
+			})
+			if err != nil {
+				log.Println("Could not respond to user message:", err)
+				commandError(s, i.Interaction, err)
+				return
+			}
+		},
+	},
 }
 
 func commandError(s *discordgo.Session, i *discordgo.Interaction, message error) {
