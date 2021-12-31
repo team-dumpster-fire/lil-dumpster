@@ -17,28 +17,27 @@ func main() {
 
 	token := os.Getenv("DISCORD_TOKEN")
 	if token == "" {
-		panic("Please set a DISCORD_TOKEN environment variable to your bot token")
+		log.Fatal("Please set a DISCORD_TOKEN environment variable to your bot token")
 	}
 
 	b, err := discordgo.New("Bot " + token)
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
 	defer b.Close()
 
 	// Register handlers
 	b.AddHandler(handleReady)
-	b.AddHandler(handleCommands)
-	b.AddHandler(handleMessageReactionAdd)
-	b.AddHandler(handleMessageReactionRemove)
+	b.AddHandler(handleCommand)
 
 	// Begin listening for events
 	err = b.Open()
 	if err != nil {
-		log.Panic("Could not connect to discord", err)
+		log.Fatal("Could not connect to discord", err)
 	}
-	log.Print("Bot is now running. Check out Discord!")
 
 	// Wait until the application is shutting down
+	log.Print("Bot is now running. Check out Discord!")
 	<-ctx.Done()
+	b.Close()
 }
