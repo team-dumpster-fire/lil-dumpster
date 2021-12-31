@@ -8,7 +8,7 @@ import (
 	"github.com/bwmarrin/discordgo"
 )
 
-var errUnauthorizedRole = errors.New("I am not authorized to manage this role for you.")
+var errUnauthorizedRole = errors.New("not authorized to manage this role")
 
 func manageRoles(s *discordgo.Session, guild *discordgo.Guild) error {
 	const rolesChannelName = "roles"
