@@ -1,43 +1,21 @@
 package main
 
 import (
+	"errors"
 	"fmt"
-	"sort"
 	"strings"
 
 	"github.com/bwmarrin/discordgo"
 )
 
-type (
-	role struct {
-		Name string
-		Game string
-	}
-
-	watchedChannel struct {
-		guild   *discordgo.Guild
-		channel *discordgo.Channel
-		message *discordgo.Message
-	}
-)
-
-var emojiRoleMap = map[string]role{
-	"among_us":       {Name: "Imposter", Game: "Among Us"},
-	"borderlands":    {Name: "Vault Hunter", Game: "Borderlands"},
-	"destiny":        {Name: "Guardian", Game: "Destiny"},
-	"jackbox":        {Name: "Jackal", Game: "Jackbox Party Pack"},
-	"sea_of_thieves": {Name: "Pirate", Game: "Sea of Thieves"},
-	"speedrunners":   {Name: "Speed Runner", Game: "SpeedRunners"},
-}
-
-var watchedChannels []watchedChannel
+var errUnauthorizedRole = errors.New("not authorized to manage this role")
 
 func manageRoles(s *discordgo.Session, guild *discordgo.Guild) error {
-	const watchedChannelName = "roles"
+	const rolesChannelName = "roles"
 
-	rolesChannel, err := findChannel(s, guild.ID, watchedChannelName)
+	rolesChannel, err := findChannel(s, guild.ID, rolesChannelName)
 	if err != nil {
-		return fmt.Errorf("could not find %s channel: %w", watchedChannelName, err)
+		return fmt.Errorf("could not find %s channel: %w", rolesChannelName, err)
 	}
 
 	messages, err := s.ChannelMessagesPinned(rolesChannel.ID)
@@ -70,68 +48,64 @@ func manageRoles(s *discordgo.Session, guild *discordgo.Guild) error {
 
 	if activeMessage.Content != messageText {
 		// Update the message text to match expected
-		activeMessage, err = s.ChannelMessageEdit(rolesChannel.ID, activeMessage.ID, messageText)
+		_, err = s.ChannelMessageEdit(rolesChannel.ID, activeMessage.ID, messageText)
 		if err != nil {
 			return fmt.Errorf("could not update the message text: %w", err)
 		}
 	}
 
-	watchedChannels = append(watchedChannels, watchedChannel{
-		guild:   guild,
-		channel: rolesChannel,
-		message: activeMessage,
-	})
 	return nil
 }
 
-func addRoleToUser(s *discordgo.Session, watch watchedChannel, reaction *discordgo.MessageReaction) error {
-	user, err := s.User(reaction.UserID)
+func addRoleToUser(s *discordgo.Session, i *discordgo.Interaction, roleName string) error {
+	role, err := findRoleForName(s, i.GuildID, roleName)
 	if err != nil {
-		return fmt.Errorf("could not find user record that added reaction: %w", err)
+		return fmt.Errorf("could not find role: %w", err)
 	}
 
-	role, err := findRoleForReaction(s, watch.guild.ID, reaction)
-	if err != nil {
-		return fmt.Errorf("could not find role for reaction: %w", err)
+	if i.Member == nil {
+		return fmt.Errorf("user not set. Have you sent this command from within a server channel?")
 	}
 
-	fmt.Printf("Adding role %s to user %s in guild %s\n", role.Name, user.Username, watch.guild.Name)
-	return s.GuildMemberRoleAdd(watch.guild.ID, user.ID, role.ID)
+	fmt.Printf("Adding role %s to user %v in guild %s\n", role.Name, i.Member.User.Username, i.GuildID)
+	err = s.GuildMemberRoleAdd(i.GuildID, i.Member.User.ID, role.ID)
+	if err != nil && strings.Contains(err.Error(), "50013") {
+		return errUnauthorizedRole
+	}
+	return err
 }
 
-func removeRoleFromUser(s *discordgo.Session, watch watchedChannel, reaction *discordgo.MessageReaction) error {
-	user, err := s.User(reaction.UserID)
+func removeRoleFromUser(s *discordgo.Session, i *discordgo.Interaction, roleName string) error {
+	role, err := findRoleForName(s, i.GuildID, roleName)
 	if err != nil {
-		return fmt.Errorf("could not find user record that added reaction: %w", err)
+		return fmt.Errorf("could not find role: %w", err)
 	}
 
-	role, err := findRoleForReaction(s, watch.guild.ID, reaction)
-	if err != nil {
-		return fmt.Errorf("could not find role for reaction: %w", err)
+	if i.Member == nil {
+		return fmt.Errorf("user not set. Have you sent this command from within a server channel?")
 	}
 
-	fmt.Printf("Removing role %s from user %s in guild %s\n", role.Name, user.Username, watch.guild.Name)
-	return s.GuildMemberRoleRemove(watch.guild.ID, user.ID, role.ID)
+	fmt.Printf("Removing role %s from user %s in guild %s\n", role.Name, i.Member.User.Username, i.GuildID)
+	err = s.GuildMemberRoleRemove(i.GuildID, i.Member.User.ID, role.ID)
+	if err != nil && strings.Contains(err.Error(), "50013") {
+		return errUnauthorizedRole
+	}
+	return err
 }
 
-func findRoleForReaction(s *discordgo.Session, guildID string, reaction *discordgo.MessageReaction) (*discordgo.Role, error) {
-	roleConfig, ok := emojiRoleMap[reaction.Emoji.Name]
-	if !ok {
-		return nil, fmt.Errorf("could not map given reaction '%s' to a role", reaction.Emoji.Name)
-	}
-
+func findRoleForName(s *discordgo.Session, guildID string, name string) (*discordgo.Role, error) {
 	roles, err := s.GuildRoles(guildID)
 	if err != nil {
 		return nil, fmt.Errorf("could not enumerate guild roles: %w", err)
 	}
 
 	for _, role := range roles {
-		if role.Name == roleConfig.Name {
+		if strings.EqualFold(role.Name, name) {
 			return role, nil
 		}
 	}
 
-	return nil, fmt.Errorf("could not find a guild role for the configured role '%s'", roleConfig.Name)
+	return nil, fmt.Errorf("could not find a guild role for the configured role '%s'", name)
 }
 
 func findChannel(s *discordgo.Session, guildID, channelName string) (*discordgo.Channel, error) {
@@ -150,23 +124,8 @@ func findChannel(s *discordgo.Session, guildID, channelName string) (*discordgo.
 }
 
 func buildRolesMessage() string {
-	const roleMessageText = `Hello! I'm watching this message for reactions, and will add or remove you from channel roles based on how you react. This lets you indicate your preferences in this server for the content you want to see!
+	return `Hello! I've registered /slash commands in this server for managing user roles. Please use the /role-add and /role-remove commands to manage your roles.
 
-I support the following reactions:
-%s
-
-If you'd like to see more roles, send a message to one of the helpful server administrators and they can help out. Have a wonderful day!
-`
-
-	var roleList []string
-
-	// :among_us: - Among Us (Imposter role)
-	// :destiny: - Destiny / Destiny 2 (Guardian role)
-	// :pirate_flag: - Sea of Thieves (Pirate role)
-	for emojiName, role := range emojiRoleMap {
-		roleList = append(roleList, fmt.Sprintf(":%s: - %s (%s role)", emojiName, role.Game, role.Name))
-	}
-	sort.Strings(roleList)
-
-	return fmt.Sprintf(roleMessageText, strings.Join(roleList, "\n"))
+If you'd like to see more roles in this server, send a message to one of the helpful server administrators and they can help out. Have a wonderful day!
+	`
 }
