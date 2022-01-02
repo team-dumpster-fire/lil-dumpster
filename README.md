@@ -1,12 +1,13 @@
 # Lil' Dumpster Bot
 
-URL: https://discord.com/api/oauth2/authorize?client_id=784836525060784178&scope=bot&permissions=268511232
+URL: https://ptb.discord.com/api/oauth2/authorize?client_id=784836525060784178&permissions=2415994880&scope=bot%20applications.commands
 
 Permissions:
 * General - Manage Roles
 * Text - Send Messages
 * Text - Manage Messages
 * Text - Read Message History
+* Text - Use Slash Commands
 
 ## Testing
 
