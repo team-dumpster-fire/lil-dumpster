@@ -13,6 +13,7 @@ func handleReady(s *discordgo.Session, event *discordgo.Ready) {
 		}
 
 		for _, cmd := range applicationCommands {
+			log.Printf("Registering application command %q for bot user %q in guild %q", cmd.Command.Name, s.State.User.ID, g.ID)
 			if _, err := s.ApplicationCommandCreate(s.State.User.ID, g.ID, cmd.Command); err != nil {
 				log.Printf("Unable to set application command %q: %s", cmd.Command.Name, err)
 			}
@@ -22,13 +23,13 @@ func handleReady(s *discordgo.Session, event *discordgo.Ready) {
 
 func handleCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	for _, cmd := range applicationCommands {
-		if cmd.Command.Name == i.ApplicationCommandData().Name {
-			switch i.Type {
-			case discordgo.InteractionApplicationCommandAutocomplete:
-				if cmd.Autocomplete == nil {
-					return
-				}
-
+		switch i.Type {
+		case discordgo.InteractionApplicationCommand:
+			if cmd.Command.Name == i.ApplicationCommandData().Name {
+				cmd.Handler(s, i)
+			}
+		case discordgo.InteractionApplicationCommandAutocomplete:
+			if cmd.Autocomplete != nil && cmd.Command.Name == i.ApplicationCommandData().Name {
 				for _, opt := range i.ApplicationCommandData().Options {
 					if opt.Focused {
 						choices := cmd.Autocomplete(s, i, opt)
@@ -38,9 +39,18 @@ func handleCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 						})
 					}
 				}
-			default:
-				cmd.Handler(s, i)
 			}
+		case discordgo.InteractionMessageComponent:
+			if cmd.MessageComponents != nil {
+				log.Println(i.MessageComponentData().CustomID)
+				for customID, fn := range cmd.MessageComponents {
+					if customID == i.MessageComponentData().CustomID {
+						fn(s, i)
+					}
+				}
+			}
+		default:
+			log.Println("Unknown interaction type encountered: ", i.Type)
 		}
 	}
 }

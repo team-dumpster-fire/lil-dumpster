@@ -9,9 +9,10 @@ import (
 )
 
 type applicationCommand struct {
-	Command      *discordgo.ApplicationCommand
-	Autocomplete func(s *discordgo.Session, i *discordgo.InteractionCreate, o *discordgo.ApplicationCommandInteractionDataOption) []*discordgo.ApplicationCommandOptionChoice
-	Handler      func(s *discordgo.Session, i *discordgo.InteractionCreate)
+	Command           *discordgo.ApplicationCommand
+	Autocomplete      func(s *discordgo.Session, i *discordgo.InteractionCreate, o *discordgo.ApplicationCommandInteractionDataOption) []*discordgo.ApplicationCommandOptionChoice
+	MessageComponents map[string]func(s *discordgo.Session, i *discordgo.InteractionCreate)
+	Handler           func(s *discordgo.Session, i *discordgo.InteractionCreate)
 }
 
 var applicationCommands = []applicationCommand{
@@ -191,20 +192,56 @@ var applicationCommands = []applicationCommand{
 				},
 			},
 		},
-		Handler: func(s *discordgo.Session, i *discordgo.InteractionCreate) {
-			emojimap := map[int]string{
-				1: "one",
-				2: "two",
-				3: "three",
-				4: "four",
-				5: "five",
-				6: "six",
-				7: "seven",
-				8: "eight",
-				9: "nine",
+		MessageComponents: func() map[string]func(*discordgo.Session, *discordgo.InteractionCreate) {
+			ret := map[string]func(*discordgo.Session, *discordgo.InteractionCreate){}
+			for i := 0; i < 20; i++ {
+				choiceN := i
+				customID := fmt.Sprintf("pollButton%d", i)
+				ret[customID] = func(s *discordgo.Session, interaction *discordgo.InteractionCreate) {
+					pollMutex.Lock()
+					defer pollMutex.Unlock()
+
+					log.Println("Button clicked: ", interaction.Message.ID, interaction.Member.User.Username)
+					poll := parsePoll(interaction.Message.Content)
+
+					// Build the new user list, skipping the actioning user
+					newUsers := []string{}
+					for _, user := range poll.choices[choiceN].mentions {
+						if user == interaction.Member.Mention() {
+							continue
+						}
+						newUsers = append(newUsers, user)
+					}
+
+					if len(poll.choices[choiceN].mentions) != len(newUsers) {
+						// If the user voted already (the list is N-1), decrement the count
+						poll.choices[choiceN].count--
+					} else {
+						// If the user hasn't voted (N), increment the count and add the user
+						poll.choices[choiceN].count++
+						newUsers = append(newUsers, interaction.Member.Mention())
+					}
+					poll.choices[choiceN].mentions = newUsers
+
+					// Log the new poll string
+					log.Println("New poll: ", poll)
+
+					// And update the string on the server
+					s.InteractionRespond(interaction.Interaction, &discordgo.InteractionResponse{
+						Type: discordgo.InteractionResponseUpdateMessage,
+						Data: &discordgo.InteractionResponseData{
+							Content:    poll.serialize(),
+							Flags:      uint64(interaction.Message.Flags),
+							Components: interaction.Message.Components,
+						},
+					})
+				}
 			}
 
-			prompt := "Poll:"
+			return ret
+		}(),
+		Handler: func(s *discordgo.Session, i *discordgo.InteractionCreate) {
+			poll := poll{prompt: "Poll:"}
 			var choicesString string
 			var flags uint64
 			for _, opt := range i.ApplicationCommandData().Options {
@@ -212,7 +249,7 @@ var applicationCommands = []applicationCommand{
 				case "choices":
 					choicesString = opt.StringValue()
 				case "prompt":
-					prompt = strings.TrimSpace(opt.StringValue())
+					poll.prompt = strings.TrimSpace(opt.StringValue())
 				case "draft":
 					if opt.BoolValue() {
 						flags = 1 << 6 // Ephemeral, private
@@ -220,23 +257,37 @@ var applicationCommands = []applicationCommand{
 				}
 			}
 
-			// Build the poll string
-			poll := strings.Builder{}
-			poll.WriteString(prompt + "\n")
-			for i, choice := range strings.Split(choicesString, ",") {
-				if _, ok := emojimap[i+1]; !ok {
-					break
+			// Build the buttons
+			buttons := []discordgo.MessageComponent{}
+			index := 0
+			for _, choice := range strings.Split(choicesString, ",") {
+				choice = strings.TrimSpace(choice)
+				if len(choice) == 0 {
+					continue
 				}
 
-				poll.WriteString(fmt.Sprintf(":%s: %s\n", emojimap[i+1], strings.TrimSpace(choice)))
+				poll.choices = append(poll.choices, pollChoice{
+					choice:   choice,
+					count:    0,
+					mentions: []string{},
+				})
+
+				buttons = append(buttons, discordgo.Button{
+					CustomID: fmt.Sprintf("pollButton%d", index),
+					Label:    fmt.Sprintf("%d", index+1),
+				})
+				index++
 			}
 
 			// Send the poll!
 			err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 				Type: discordgo.InteractionResponseChannelMessageWithSource,
 				Data: &discordgo.InteractionResponseData{
-					Content: poll.String(),
+					Content: poll.serialize(),
 					Flags:   flags,
+					Components: []discordgo.MessageComponent{
+						discordgo.ActionsRow{Components: buttons},
+					},
 				},
 			})
 			if err != nil {
