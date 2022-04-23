@@ -1,4 +1,4 @@
-FROM golang:1.17-alpine
+FROM golang:1.18.1-alpine
 
 # Build the app, dependencies first
 COPY go.mod go.sum /app/
@@ -11,7 +11,7 @@ RUN go build -o main
 RUN go test ./...
 
 # ---
-FROM alpine:3.12 AS dist
+FROM alpine:3.15 AS dist
 
 # Dependencies
 RUN apk add --no-cache ca-certificates
