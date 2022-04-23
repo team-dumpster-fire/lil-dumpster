@@ -13,7 +13,6 @@ type applicationCommand struct {
 	Autocomplete      func(s *discordgo.Session, i *discordgo.InteractionCreate, o *discordgo.ApplicationCommandInteractionDataOption) []*discordgo.ApplicationCommandOptionChoice
 	MessageComponents map[string]func(s *discordgo.Session, i *discordgo.InteractionCreate)
 	Handler           func(s *discordgo.Session, i *discordgo.InteractionCreate)
-	store             state.Backend
 }
 
 type commandRegistration func(store state.Backend) []applicationCommand
