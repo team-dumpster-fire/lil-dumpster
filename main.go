@@ -8,6 +8,7 @@ import (
 	"syscall"
 
 	"github.com/bwmarrin/discordgo"
+	"github.com/team-dumpster-fire/lil-dumpster/cmd"
 )
 
 func main() {
@@ -27,8 +28,8 @@ func main() {
 	defer b.Close()
 
 	// Register handlers
-	b.AddHandler(handleReady)
-	b.AddHandler(handleCommand)
+	b.AddHandler(cmd.HandleReady)
+	b.AddHandler(cmd.HandleCommand)
 
 	// Begin listening for events
 	err = b.Open()

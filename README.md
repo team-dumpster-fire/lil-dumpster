@@ -15,7 +15,7 @@ This bot may be tested locally provided that you have a DISCORD_TOKEN environmen
 
 ```sh
 export DISCORD_TOKEN=xxxtokenxxx
-go build && ./lil-dumpster
+go run main.go
 ```
 
 Alternatively if you need to develop against the bot directly, coordinate with the repository owner(s) and we can shutdown the existing bot and distribute its token to you.

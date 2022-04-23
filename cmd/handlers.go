@@ -1,4 +1,4 @@
-package main
+package cmd
 
 import (
 	"log"
@@ -6,7 +6,7 @@ import (
 	"github.com/bwmarrin/discordgo"
 )
 
-func handleReady(s *discordgo.Session, event *discordgo.Ready) {
+func HandleReady(s *discordgo.Session, event *discordgo.Ready) {
 	for _, g := range event.Guilds {
 		if err := manageRoles(s, g); err != nil {
 			log.Println("Failed to watch guild:", err)
@@ -21,7 +21,7 @@ func handleReady(s *discordgo.Session, event *discordgo.Ready) {
 	}
 }
 
-func handleCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
+func HandleCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	for _, cmd := range applicationCommands {
 		switch i.Type {
 		case discordgo.InteractionApplicationCommand:
