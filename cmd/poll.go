@@ -7,6 +7,9 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+
+	"github.com/bwmarrin/discordgo"
+	"github.com/team-dumpster-fire/lil-dumpster/internal/state"
 )
 
 type poll struct {
@@ -21,6 +24,143 @@ type pollChoice struct {
 }
 
 var pollMutex sync.Mutex
+
+func init() {
+	fnRegisterCommands = append(fnRegisterCommands, func(store state.Backend) []applicationCommand {
+		return []applicationCommand{
+			{
+				Command: &discordgo.ApplicationCommand{
+					Name:        "poll",
+					Description: "Submit a poll to the channel",
+					Options: []*discordgo.ApplicationCommandOption{
+						{
+							Type:        discordgo.ApplicationCommandOptionString,
+							Name:        "choices",
+							Description: "Comma-separated list of choices for presenting to users",
+							Required:    true,
+						},
+						{
+							Type:        discordgo.ApplicationCommandOptionString,
+							Name:        "prompt",
+							Description: "Question to ask users",
+							Required:    false,
+						},
+						{
+							Type:        discordgo.ApplicationCommandOptionBoolean,
+							Name:        "draft",
+							Description: "If true, will only display the poll to you so that you may review the output",
+							Required:    false,
+						},
+					},
+				},
+				MessageComponents: func() map[string]func(*discordgo.Session, *discordgo.InteractionCreate) {
+					ret := map[string]func(*discordgo.Session, *discordgo.InteractionCreate){}
+					for i := 0; i < 20; i++ {
+						choiceN := i
+						customID := fmt.Sprintf("pollButton%d", i)
+						ret[customID] = func(s *discordgo.Session, interaction *discordgo.InteractionCreate) {
+							pollMutex.Lock()
+							defer pollMutex.Unlock()
+
+							log.Println("Button clicked: ", interaction.Message.ID, interaction.Member.User.Username)
+							poll := parsePoll(interaction.Message.Content)
+
+							// Build the new user list, skipping the actioning user
+							newUsers := []string{}
+							for _, user := range poll.choices[choiceN].mentions {
+								if user == interaction.Member.Mention() {
+									continue
+								}
+								newUsers = append(newUsers, user)
+							}
+
+							if len(poll.choices[choiceN].mentions) != len(newUsers) {
+								// If the user voted already (the list is N-1), decrement the count
+								poll.choices[choiceN].count--
+							} else {
+								// If the user hasn't voted (N), increment the count and add the user
+								poll.choices[choiceN].count++
+								newUsers = append(newUsers, interaction.Member.Mention())
+							}
+							poll.choices[choiceN].mentions = newUsers
+
+							// Log the new poll string
+							log.Println("New poll: ", poll)
+
+							// And update the string on the server
+							s.InteractionRespond(interaction.Interaction, &discordgo.InteractionResponse{
+								Type: discordgo.InteractionResponseUpdateMessage,
+								Data: &discordgo.InteractionResponseData{
+									Content:    poll.serialize(),
+									Flags:      uint64(interaction.Message.Flags),
+									Components: interaction.Message.Components,
+								},
+							})
+						}
+					}
+
+					return ret
+				}(),
+				Handler: func(s *discordgo.Session, i *discordgo.InteractionCreate) {
+					poll := poll{prompt: "Poll:"}
+					var choicesString string
+					var flags uint64
+					for _, opt := range i.ApplicationCommandData().Options {
+						switch opt.Name {
+						case "choices":
+							choicesString = opt.StringValue()
+						case "prompt":
+							poll.prompt = strings.TrimSpace(opt.StringValue())
+						case "draft":
+							if opt.BoolValue() {
+								flags = 1 << 6 // Ephemeral, private
+							}
+						}
+					}
+
+					// Build the buttons
+					buttons := []discordgo.MessageComponent{}
+					index := 0
+					for _, choice := range strings.Split(choicesString, ",") {
+						choice = strings.TrimSpace(choice)
+						if len(choice) == 0 {
+							continue
+						}
+
+						poll.choices = append(poll.choices, pollChoice{
+							choice:   choice,
+							count:    0,
+							mentions: []string{},
+						})
+
+						buttons = append(buttons, discordgo.Button{
+							CustomID: fmt.Sprintf("pollButton%d", index),
+							Label:    fmt.Sprintf("%d", index+1),
+						})
+						index++
+					}
+
+					// Send the poll!
+					err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+						Type: discordgo.InteractionResponseChannelMessageWithSource,
+						Data: &discordgo.InteractionResponseData{
+							Content: poll.serialize(),
+							Flags:   flags,
+							Components: []discordgo.MessageComponent{
+								discordgo.ActionsRow{Components: buttons},
+							},
+						},
+					})
+					if err != nil {
+						log.Println("Could not respond to user message:", err)
+						commandError(s, i.Interaction, err)
+						return
+					}
+				},
+			},
+		}
+	})
+}
 
 func parsePoll(msg string) poll {
 	// * Choice (0)

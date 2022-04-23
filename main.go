@@ -9,6 +9,7 @@ import (
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/team-dumpster-fire/lil-dumpster/cmd"
+	"github.com/team-dumpster-fire/lil-dumpster/internal/state"
 )
 
 func main() {
@@ -27,9 +28,8 @@ func main() {
 	}
 	defer b.Close()
 
-	// Register handlers
-	b.AddHandler(cmd.HandleReady)
-	b.AddHandler(cmd.HandleCommand)
+	commands := cmd.NewCommands(b, state.NewMemory())
+	commands.AddHandlers()
 
 	// Begin listening for events
 	err = b.Open()
