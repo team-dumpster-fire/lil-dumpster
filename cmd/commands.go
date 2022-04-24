@@ -49,7 +49,7 @@ func (c *Commands) handleReady(s *discordgo.Session, event *discordgo.Ready) {
 		}
 
 		for _, cmd := range c.commands {
-			log.Printf("Registering application command %q for bot user %q in guild %q", cmd.Command.Name, s.State.User.ID, g.ID)
+			fmt.Printf("Registering application command %q for bot user %q in guild %q\n", cmd.Command.Name, s.State.User.ID, g.ID)
 			if _, err := s.ApplicationCommandCreate(s.State.User.ID, g.ID, cmd.Command); err != nil {
 				log.Printf("Unable to set application command %q: %s", cmd.Command.Name, err)
 			}

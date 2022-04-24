@@ -31,7 +31,7 @@ func main() {
 	}
 	defer b.Close()
 
-	commands := cmd.NewCommands(b, configureBackend())
+	commands := cmd.NewCommands(b, configureBackend(ctx))
 	commands.AddHandlers()
 
 	// Begin listening for events
@@ -41,12 +41,12 @@ func main() {
 	}
 
 	// Wait until the application is shutting down
-	log.Print("Bot is now running. Check out Discord!")
+	fmt.Println("Bot is now running. Check out Discord!")
 	<-ctx.Done()
 	b.Close()
 }
 
-func configureBackend() state.Backend {
+func configureBackend(ctx context.Context) state.Backend {
 	var store state.Backend = state.NewMemory()
 	if host, ok := os.LookupEnv("REDIS_HOST"); ok {
 		var port string
@@ -56,7 +56,11 @@ func configureBackend() state.Backend {
 			}
 		}
 
-		store = state.NewRedis(&redis.Options{Addr: fmt.Sprintf("%s:%s", host, port)})
+		addr := fmt.Sprintf("%s:%s", host, port)
+		store = state.NewRedis(&redis.Options{Addr: addr})
+		if err := store.Set(ctx, "client", "lil-dumpster"); err != nil {
+			log.Fatalf("Unable to connect to Redis backend at %s: %s", addr, err)
+		}
 	}
 
 	return store
