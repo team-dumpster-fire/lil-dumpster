@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log"
@@ -11,18 +12,27 @@ import (
 	"github.com/team-dumpster-fire/lil-dumpster/internal/state"
 )
 
-type rotator struct {
-	s       discordRotatorSession
-	channel string
-	store   state.Backend
-	prefix  string
-}
+type (
+	rotator struct {
+		channel string
+		store   state.Backend
+		prefix  string
+	}
 
-type rotation struct {
-	Current         int
-	CurrentAssigned time.Time
-	Users           []string
-}
+	rotationUser struct {
+		ID           string
+		LastAssigned time.Time
+	}
+
+	rotation struct {
+		Current int
+		Users   []rotationUser
+	}
+
+	rotatorSession interface {
+		User(userID string) (st *discordgo.User, err error)
+	}
+)
 
 func init() {
 	fnRegisterCommands = append(fnRegisterCommands, func(store state.Backend) []applicationCommand {
@@ -34,16 +44,16 @@ func init() {
 					Options:     []*discordgo.ApplicationCommandOption{},
 				},
 				Handler: func(s *discordgo.Session, i *discordgo.InteractionCreate) {
-					rot := newRotator(s, i.ChannelID, store)
+					rot := newRotator(i.ChannelID, store)
 
-					currentUser, currentAssigned, err := rot.Current()
+					currentUser, err := rot.Current(context.TODO())
 					if err != nil {
 						log.Println("Could not look up current user:", err)
 						commandError(s, i.Interaction, err)
 						return
 					}
 
-					list, err := rot.ListFormatted()
+					list, err := rot.ListFormatted(context.TODO(), s)
 					if err != nil {
 						log.Println("Could not render current list:", err)
 						commandError(s, i.Interaction, err)
@@ -53,7 +63,7 @@ func init() {
 					err = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 						Type: discordgo.InteractionResponseChannelMessageWithSource,
 						Data: &discordgo.InteractionResponseData{
-							Content: fmt.Sprintf("%s\n\n%s is the current user as of %s", list, currentUser.Mention(), currentAssigned.Format("2006-01-02")),
+							Content: fmt.Sprintf("%s\n\n%s is the current user as of <t:%d:R>", list, currentUser.resolve(s).Mention(), currentUser.LastAssigned.Unix()),
 							Flags:   1 << 6, // Ephemeral, private
 						},
 					})
@@ -80,14 +90,20 @@ func init() {
 				Handler: func(s *discordgo.Session, i *discordgo.InteractionCreate) {
 					user := i.ApplicationCommandData().Options[0].UserValue(s)
 
-					rot := newRotator(s, i.ChannelID, store)
-					if err := rot.AddUser(user.ID); err != nil {
+					if user == nil {
+						log.Println("A user must be provided")
+						commandError(s, i.Interaction, errors.New("a user must be provided"))
+						return
+					}
+
+					rot := newRotator(i.ChannelID, store)
+					if err := rot.AddUser(context.TODO(), *user); err != nil {
 						log.Println("Could not add user to rotation:", err)
 						commandError(s, i.Interaction, err)
 						return
 					}
 
-					list, err := rot.ListFormatted()
+					list, err := rot.ListFormatted(context.TODO(), s)
 					if err != nil {
 						log.Println("Could not render current list:", err)
 						commandError(s, i.Interaction, err)
@@ -124,14 +140,14 @@ func init() {
 				Handler: func(s *discordgo.Session, i *discordgo.InteractionCreate) {
 					user := i.ApplicationCommandData().Options[0].UserValue(s)
 
-					rot := newRotator(s, i.ChannelID, store)
-					if err := rot.RemoveUser(user.ID); err != nil {
+					rot := newRotator(i.ChannelID, store)
+					if err := rot.RemoveUser(context.TODO(), user.ID); err != nil {
 						log.Println("Could not remove user from rotation:", err)
 						commandError(s, i.Interaction, err)
 						return
 					}
 
-					list, err := rot.ListFormatted()
+					list, err := rot.ListFormatted(context.TODO(), s)
 					if err != nil {
 						log.Println("Could not render current list:", err)
 						commandError(s, i.Interaction, err)
@@ -156,18 +172,29 @@ func init() {
 				Command: &discordgo.ApplicationCommand{
 					Name:        "rotator-advance",
 					Description: "Advance the channel rotation to the next user",
-					Options:     []*discordgo.ApplicationCommandOption{},
+					Options: []*discordgo.ApplicationCommandOption{
+						{
+							Type:        discordgo.ApplicationCommandOptionBoolean,
+							Name:        "reverse",
+							Description: "Advance to the prior user in the rotation",
+						},
+					},
 				},
 				Handler: func(s *discordgo.Session, i *discordgo.InteractionCreate) {
-					rot := newRotator(s, i.ChannelID, store)
-					user, err := rot.Advance()
+					var reverse bool
+					if len(i.ApplicationCommandData().Options) > 0 {
+						reverse = i.ApplicationCommandData().Options[0].BoolValue()
+					}
+
+					rot := newRotator(i.ChannelID, store)
+					user, err := rot.Advance(context.TODO(), reverse)
 					if err != nil {
 						log.Println("Could not advance rotation:", err)
 						commandError(s, i.Interaction, err)
 						return
 					}
 
-					list, err := rot.ListFormatted()
+					list, err := rot.ListFormatted(context.TODO(), s)
 					if err != nil {
 						log.Println("Could not render current list:", err)
 						commandError(s, i.Interaction, err)
@@ -177,7 +204,7 @@ func init() {
 					err = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 						Type: discordgo.InteractionResponseChannelMessageWithSource,
 						Data: &discordgo.InteractionResponseData{
-							Content: fmt.Sprintf("%s\n\n%s is now assigned in the rotation!", list, user.Mention()),
+							Content: fmt.Sprintf("%s\n\n%s is now assigned in the rotation!", list, user.resolve(s).Mention()),
 						},
 					})
 					if err != nil {
@@ -191,55 +218,29 @@ func init() {
 	})
 }
 
-type discordRotatorSession interface {
-	User(userID string) (st *discordgo.User, err error)
-}
-
-func newRotator(s discordRotatorSession, channel string, store state.Backend) *rotator {
+func newRotator(channel string, store state.Backend) *rotator {
 	return &rotator{
-		s:       s,
 		channel: channel,
 		store:   store,
 		prefix:  fmt.Sprintf("rotator/%s/", channel),
 	}
 }
 
-func (r *rotator) Current() (*discordgo.User, time.Time, error) {
-	data, err := r.getRotation()
+func (r *rotator) Current(ctx context.Context) (rotationUser, error) {
+	data, err := r.getRotation(ctx)
 	if err != nil {
-		return &discordgo.User{}, time.Now(), fmt.Errorf("unable to get current rotation: %w", err)
+		return rotationUser{}, fmt.Errorf("unable to get current rotation: %w", err)
 	} else if len(data.Users) == 0 {
-		return &discordgo.User{}, data.CurrentAssigned, errors.New("no users currently in rotation")
+		return rotationUser{}, errors.New("no users currently in rotation")
 	} else if data.Current >= len(data.Users) {
-		return &discordgo.User{}, data.CurrentAssigned, errors.New("current user out of range")
+		return rotationUser{}, errors.New("current user out of range")
 	}
 
-	user, err := r.resolveUser(data.Users[data.Current])
-	if err != nil {
-		return user, data.CurrentAssigned, fmt.Errorf("could not resolve current user: %w", err)
-	}
-
-	return user, data.CurrentAssigned, nil
+	return data.Users[data.Current], nil
 }
 
-func (r *rotator) Peek() (*discordgo.User, error) {
-	data, err := r.getRotation()
-	if err != nil {
-		return &discordgo.User{}, fmt.Errorf("unable to get current rotation: %w", err)
-	} else if len(data.Users) == 0 {
-		return &discordgo.User{}, errors.New("no users currently in rotation")
-	}
-
-	next := data.Current + 1
-	if next >= len(data.Users) {
-		next = 0
-	}
-
-	return r.resolveUser(data.Users[next])
-}
-
-func (r *rotator) ListFormatted() (string, error) {
-	data, err := r.getRotation()
+func (r *rotator) ListFormatted(ctx context.Context, s rotatorSession) (string, error) {
+	data, err := r.getRotation(ctx)
 	if err != nil {
 		return "", fmt.Errorf("unable to get current rotation: %w", err)
 	} else if len(data.Users) == 0 {
@@ -247,13 +248,8 @@ func (r *rotator) ListFormatted() (string, error) {
 	}
 
 	ret := []string{}
-	for i, id := range data.Users {
-		user, err := r.resolveUser(id)
-		if err != nil {
-			user = &discordgo.User{ID: id, Username: id}
-		}
-
-		add := user.Username
+	for i, user := range data.Users {
+		add := user.resolve(s).Username
 		if i == data.Current {
 			add = "**" + add + "**"
 		}
@@ -261,94 +257,103 @@ func (r *rotator) ListFormatted() (string, error) {
 		ret = append(ret, add)
 	}
 
-	return "[ " + strings.Join(ret, " => ") + " ]", nil
+	return "[ " + strings.Join(ret, " :fast_forward: ") + " ]", nil
 }
 
-func (r *rotator) Advance() (*discordgo.User, error) {
-	data, err := r.getRotation()
+func (r *rotator) Advance(ctx context.Context, reverse bool) (rotationUser, error) {
+	data, err := r.getRotation(ctx)
 	if err != nil {
-		return &discordgo.User{}, fmt.Errorf("unable to get current rotation: %w", err)
+		return rotationUser{}, fmt.Errorf("unable to get current rotation: %w", err)
 	} else if len(data.Users) == 0 {
-		return &discordgo.User{}, errors.New("no users currently in rotation")
+		return rotationUser{}, errors.New("no users currently in rotation")
 	}
 
-	data.Current++
-	data.CurrentAssigned = time.Now()
-	var ret *discordgo.User
-	for ret == nil {
+	if reverse {
+		data.Current--
+		if data.Current < 0 {
+			data.Current = len(data.Users) - 1
+		}
+	} else {
+		data.Current++
 		if data.Current >= len(data.Users) {
 			data.Current = 0
 		}
-
-		ret, err = r.resolveUser(data.Users[data.Current])
-		if err != nil {
-			return ret, fmt.Errorf("could not get user %q: %w", data.Users[data.Current], err)
-		}
 	}
 
-	return ret, r.setRotation(data)
+	data.Users[data.Current].LastAssigned = time.Now()
+	return data.Users[data.Current], r.setRotation(ctx, data)
 }
 
-func (r *rotator) AddUser(id string) error {
-	data, err := r.getRotation()
+func (r *rotator) AddUser(ctx context.Context, user discordgo.User) error {
+	data, err := r.getRotation(ctx)
 	if err != nil {
 		return fmt.Errorf("unable to get current rotation: %w", err)
-	} else if _, err = r.resolveUser(id); err != nil {
-		return fmt.Errorf("unable to resolve user id: %w", err)
 	}
 
 	for _, newID := range data.Users {
-		if newID == id {
+		if newID.ID == user.ID {
 			return errors.New("user is already in the rotation")
 		}
 	}
 
-	data.Users = append(data.Users, id)
+	add := rotationUser{ID: user.ID}
 
 	// If this is the first user to be added, they're automatically the current!
-	if len(data.Users) == 1 {
-		data.CurrentAssigned = time.Now()
+	if len(data.Users) == 0 {
+		add.LastAssigned = time.Now()
 	}
 
-	return r.setRotation(data)
+	data.Users = append(data.Users, add)
+	return r.setRotation(ctx, data)
 }
 
-func (r *rotator) RemoveUser(id string) error {
-	data, err := r.getRotation()
+func (r *rotator) RemoveUser(ctx context.Context, id string) error {
+	data, err := r.getRotation(ctx)
 	if err != nil {
 		return fmt.Errorf("unable to get current rotation: %w", err)
 	}
 
 	for i := range data.Users {
-		if data.Users[i] == id {
+		if data.Users[i].ID == id {
 			data.Users = append(data.Users[0:i], data.Users[i+1:]...)
 
-			// If we removed the current user, then the next user just got assigned
+			// If we removed the current user, then advance to the next user
 			if i == data.Current {
-				data.CurrentAssigned = time.Now()
+				data.Current--
+				if err := r.setRotation(ctx, data); err != nil {
+					return err
+				}
+				_, err = r.Advance(ctx, false)
+				return err
 			}
+
 			break
 		}
 	}
 
-	return r.setRotation(data)
+	return r.setRotation(ctx, data)
 }
 
-func (r *rotator) resolveUser(id string) (*discordgo.User, error) {
-	return r.s.User(id)
-}
-
-func (r *rotator) getRotation() (rotation, error) {
+func (r *rotator) getRotation(ctx context.Context) (rotation, error) {
 	data := rotation{}
-	err := r.store.Get(r.prefix+"rotation", &data)
+	err := r.store.Get(ctx, r.prefix+"rotation", &data)
 	if err != nil {
 		log.Printf("Rotation not found for %q. Creating an empty one", r.prefix)
-		err = r.store.Set(r.prefix+"rotation", &data)
+		err = r.store.Set(ctx, r.prefix+"rotation", &data)
 	}
 
 	return data, err
 }
 
-func (r *rotator) setRotation(data rotation) error {
-	return r.store.Set(r.prefix+"rotation", &data)
+func (r *rotator) setRotation(ctx context.Context, data rotation) error {
+	return r.store.Set(ctx, r.prefix+"rotation", &data)
+}
+
+func (u *rotationUser) resolve(s rotatorSession) *discordgo.User {
+	user, err := s.User(u.ID)
+	if err != nil {
+		return &discordgo.User{Username: "Unknown"}
+	}
+
+	return user
 }

@@ -2,12 +2,15 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/bwmarrin/discordgo"
+	"github.com/go-redis/redis/v8"
 	"github.com/team-dumpster-fire/lil-dumpster/cmd"
 	"github.com/team-dumpster-fire/lil-dumpster/internal/state"
 )
@@ -28,7 +31,7 @@ func main() {
 	}
 	defer b.Close()
 
-	commands := cmd.NewCommands(b, state.NewMemory())
+	commands := cmd.NewCommands(b, configureBackend())
 	commands.AddHandlers()
 
 	// Begin listening for events
@@ -41,4 +44,20 @@ func main() {
 	log.Print("Bot is now running. Check out Discord!")
 	<-ctx.Done()
 	b.Close()
+}
+
+func configureBackend() state.Backend {
+	var store state.Backend = state.NewMemory()
+	if host, ok := os.LookupEnv("REDIS_HOST"); ok {
+		var port string
+		if host, port, ok = strings.Cut(host, ":"); !ok {
+			if port, ok = os.LookupEnv("REDIS_PORT"); !ok {
+				port = "4646"
+			}
+		}
+
+		store = state.NewRedis(&redis.Options{Addr: fmt.Sprintf("%s:%s", host, port)})
+	}
+
+	return store
 }

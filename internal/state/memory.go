@@ -1,6 +1,7 @@
 package state
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"sync"
@@ -14,7 +15,7 @@ func NewMemory() *Memory {
 	return &Memory{}
 }
 
-func (s Memory) Set(key string, value interface{}) (err error) {
+func (s Memory) Set(ctx context.Context, key string, value interface{}) (err error) {
 	memoryMutext.Lock()
 	defer memoryMutext.Unlock()
 
@@ -22,7 +23,7 @@ func (s Memory) Set(key string, value interface{}) (err error) {
 	return
 }
 
-func (s Memory) Get(key string, value interface{}) error {
+func (s Memory) Get(ctx context.Context, key string, value interface{}) error {
 	if data, ok := s[key]; !ok {
 		return errors.New("key not found")
 	} else {

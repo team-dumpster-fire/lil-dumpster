@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"errors"
 	"reflect"
 	"testing"
@@ -13,142 +14,55 @@ import (
 func Test_rotator_Current(t *testing.T) {
 	tests := []struct {
 		name    string
-		s       discordRotatorSession
 		r       rotation
-		want    *discordgo.User
-		want1   time.Time
+		want    rotationUser
 		wantErr bool
 	}{
 		{
 			name: "found",
 			r: rotation{
 				Current: 0,
-				Users:   []string{"123"},
-			},
-			s: &mockDiscordSession{
-				mockUser: func(userID string) (st *discordgo.User, err error) {
-					if userID == "123" {
-						return &discordgo.User{ID: userID}, nil
-					}
-					return nil, errors.New("unexpected user requested")
+				Users: []rotationUser{
+					{ID: "123"},
 				},
 			},
-			want: &discordgo.User{ID: "123"},
+			want: rotationUser{ID: "123"},
 		},
 		{
 			name: "found+1",
 			r: rotation{
 				Current: 1,
-				Users:   []string{"123", "456"},
-			},
-			s: &mockDiscordSession{
-				mockUser: func(userID string) (st *discordgo.User, err error) {
-					if userID == "123" || userID == "456" {
-						return &discordgo.User{ID: userID}, nil
-					}
-					return nil, errors.New("unexpected user requested")
+				Users: []rotationUser{
+					{ID: "123"},
+					{ID: "456"},
 				},
 			},
-			want: &discordgo.User{ID: "456"},
+			want: rotationUser{ID: "456"},
 		},
 		{
 			name: "empty",
 			r: rotation{
 				Current: 0,
-				Users:   []string{},
+				Users:   []rotationUser{},
 			},
-			want:    &discordgo.User{},
+			want:    rotationUser{},
 			wantErr: true,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			r := &rotator{
-				s:     tt.s,
 				store: state.NewMemory(),
 			}
-			r.store.Set("rotation", tt.r)
+			r.store.Set(context.Background(), "rotation", tt.r)
 
-			got, got1, err := r.Current()
+			got, err := r.Current(context.Background())
 			if (err != nil) != tt.wantErr {
 				t.Errorf("rotator.Current() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("rotator.Current() got = %v, want %v", got, tt.want)
-			}
-			if !reflect.DeepEqual(got1, tt.want1) {
-				t.Errorf("rotator.Current() got1 = %v, want %v", got1, tt.want1)
-			}
-		})
-	}
-}
-
-func Test_rotator_Peek(t *testing.T) {
-	tests := []struct {
-		name    string
-		s       discordRotatorSession
-		r       rotation
-		want    *discordgo.User
-		wantErr bool
-	}{
-		{
-			name: "basic",
-			r: rotation{
-				Current: 0,
-				Users:   []string{"123", "456"},
-			},
-			s: &mockDiscordSession{
-				mockUser: func(userID string) (st *discordgo.User, err error) {
-					if userID == "123" || userID == "456" {
-						return &discordgo.User{ID: userID}, nil
-					}
-					return nil, errors.New("unexpected user requested")
-				},
-			},
-			want: &discordgo.User{ID: "456"},
-		},
-		{
-			name: "overflow",
-			r: rotation{
-				Current: 1,
-				Users:   []string{"123", "456"},
-			},
-			s: &mockDiscordSession{
-				mockUser: func(userID string) (st *discordgo.User, err error) {
-					if userID == "123" || userID == "456" {
-						return &discordgo.User{ID: userID}, nil
-					}
-					return nil, errors.New("unexpected user requested")
-				},
-			},
-			want: &discordgo.User{ID: "123"},
-		},
-		{
-			name: "empty",
-			r: rotation{
-				Current: 0,
-				Users:   []string{},
-			},
-			want:    &discordgo.User{},
-			wantErr: true,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			r := &rotator{
-				s:     tt.s,
-				store: state.NewMemory(),
-			}
-			r.store.Set("rotation", tt.r)
-
-			got, err := r.Peek()
-			if (err != nil) != tt.wantErr {
-				t.Errorf("rotator.Peek() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("rotator.Peek() = %v, want %v", got, tt.want)
 			}
 		})
 	}
@@ -157,8 +71,8 @@ func Test_rotator_Peek(t *testing.T) {
 func Test_rotator_ListFormatted(t *testing.T) {
 	tests := []struct {
 		name    string
-		s       discordRotatorSession
 		r       rotation
+		s       rotatorSession
 		want    string
 		wantErr bool
 	}{
@@ -166,23 +80,26 @@ func Test_rotator_ListFormatted(t *testing.T) {
 			name: "basic",
 			r: rotation{
 				Current: 0,
-				Users:   []string{"123", "456"},
+				Users: []rotationUser{
+					{ID: "123"},
+					{ID: "456"},
+				},
 			},
 			s: &mockDiscordSession{
 				mockUser: func(userID string) (st *discordgo.User, err error) {
 					if userID == "123" || userID == "456" {
 						return &discordgo.User{ID: userID, Username: userID}, nil
 					}
-					return nil, errors.New("unexpected user requested")
+					return nil, errors.New("unexpexted user requested")
 				},
 			},
-			want: "[ **123** => 456 ]",
+			want: "[ **123** :fast_forward: 456 ]",
 		},
 		{
 			name: "empty",
 			r: rotation{
 				Current: 0,
-				Users:   []string{},
+				Users:   []rotationUser{},
 			},
 			want:    "",
 			wantErr: true,
@@ -191,12 +108,11 @@ func Test_rotator_ListFormatted(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			r := &rotator{
-				s:     tt.s,
 				store: state.NewMemory(),
 			}
-			r.store.Set("rotation", tt.r)
+			r.store.Set(context.Background(), "rotation", tt.r)
 
-			got, err := r.ListFormatted()
+			got, err := r.ListFormatted(context.Background(), tt.s)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("rotator.ListFormatted() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -209,68 +125,88 @@ func Test_rotator_ListFormatted(t *testing.T) {
 }
 
 func Test_rotator_Advance(t *testing.T) {
+
 	tests := []struct {
 		name    string
-		s       discordRotatorSession
+		reverse bool
 		r       rotation
-		want    *discordgo.User
+		want    rotationUser
 		wantErr bool
 	}{
 		{
 			name: "basic",
 			r: rotation{
 				Current: 0,
-				Users:   []string{"123", "456"},
-			},
-			s: &mockDiscordSession{
-				mockUser: func(userID string) (st *discordgo.User, err error) {
-					if userID == "123" || userID == "456" {
-						return &discordgo.User{ID: userID}, nil
-					}
-					return nil, errors.New("unexpected user requested")
+				Users: []rotationUser{
+					{ID: "123", LastAssigned: time.Now()},
+					{ID: "456"},
+					{ID: "789"},
 				},
 			},
-			want: &discordgo.User{ID: "456"},
+			want: rotationUser{ID: "456"},
 		},
 		{
 			name: "overflow",
 			r: rotation{
-				Current: 1,
-				Users:   []string{"123", "456"},
-			},
-			s: &mockDiscordSession{
-				mockUser: func(userID string) (st *discordgo.User, err error) {
-					if userID == "123" || userID == "456" {
-						return &discordgo.User{ID: userID}, nil
-					}
-					return nil, errors.New("unexpected user requested")
+				Current: 2,
+				Users: []rotationUser{
+					{ID: "123"},
+					{ID: "456"},
+					{ID: "789", LastAssigned: time.Now()},
 				},
 			},
-			want: &discordgo.User{ID: "123"},
+			want: rotationUser{ID: "123"},
+		},
+		{
+			name: "reverse",
+			r: rotation{
+				Current: 1,
+				Users: []rotationUser{
+					{ID: "123"},
+					{ID: "456", LastAssigned: time.Now()},
+					{ID: "789"},
+				},
+			},
+			reverse: true,
+			want:    rotationUser{ID: "123"},
+		},
+		{
+			name: "reverse-overflow",
+			r: rotation{
+				Current: 0,
+				Users: []rotationUser{
+					{ID: "123", LastAssigned: time.Now()},
+					{ID: "456"},
+					{ID: "789"},
+				},
+			},
+			reverse: true,
+			want:    rotationUser{ID: "789"},
 		},
 		{
 			name: "empty",
 			r: rotation{
 				Current: 0,
-				Users:   []string{},
+				Users:   []rotationUser{},
 			},
-			want:    &discordgo.User{},
+			want:    rotationUser{},
 			wantErr: true,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			r := &rotator{
-				s:     tt.s,
 				store: state.NewMemory(),
 			}
-			r.store.Set("rotation", tt.r)
+			r.store.Set(context.Background(), "rotation", tt.r)
 
-			got, err := r.Advance()
+			got, err := r.Advance(context.Background(), tt.reverse)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("rotator.Advance() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
+
+			got.LastAssigned = time.Time{}
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("rotator.Advance() = %v, want %v", got, tt.want)
 			}
@@ -280,11 +216,10 @@ func Test_rotator_Advance(t *testing.T) {
 
 func Test_rotator_AddUser(t *testing.T) {
 	type args struct {
-		id string
+		user discordgo.User
 	}
 	tests := []struct {
 		name      string
-		s         discordRotatorSession
 		r         rotation
 		args      args
 		wantState rotation
@@ -294,56 +229,61 @@ func Test_rotator_AddUser(t *testing.T) {
 			name: "basic",
 			r: rotation{
 				Current: 0,
-				Users:   []string{"123", "456"},
-			},
-			s: &mockDiscordSession{
-				mockUser: func(userID string) (st *discordgo.User, err error) {
-					if userID == "123" || userID == "456" || userID == "789" {
-						return &discordgo.User{ID: userID}, nil
-					}
-					return nil, errors.New("unexpected user requested")
+				Users: []rotationUser{
+					{ID: "123", LastAssigned: time.Now()},
+					{ID: "456"},
 				},
 			},
-			args: args{id: "789"},
+			args: args{discordgo.User{ID: "789"}},
 			wantState: rotation{
 				Current: 0,
-				Users:   []string{"123", "456", "789"},
+				Users: []rotationUser{
+					{ID: "123", LastAssigned: time.Now()},
+					{ID: "456"},
+					{ID: "789"},
+				},
 			},
 		},
 		{
-			name: "unknown-user",
+			name: "first",
 			r: rotation{
 				Current: 0,
-				Users:   []string{},
+				Users:   []rotationUser{},
 			},
-			s: &mockDiscordSession{
-				mockUser: func(userID string) (st *discordgo.User, err error) {
-					return nil, errors.New("unknown user")
-				},
-			},
+			args: args{discordgo.User{ID: "123"}},
 			wantState: rotation{
 				Current: 0,
-				Users:   []string{},
+				Users: []rotationUser{
+					{ID: "123", LastAssigned: time.Now()},
+				},
 			},
-			args:    args{id: "789"},
-			wantErr: true,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			r := &rotator{
-				s:     tt.s,
 				store: state.NewMemory(),
 			}
-			r.store.Set("rotation", tt.r)
+			r.store.Set(context.Background(), "rotation", tt.r)
 
-			if err := r.AddUser(tt.args.id); (err != nil) != tt.wantErr {
+			if err := r.AddUser(context.Background(), tt.args.user); (err != nil) != tt.wantErr {
 				t.Errorf("rotator.AddUser() error = %v, wantErr %v", err, tt.wantErr)
 			}
 
 			gotState := rotation{}
-			r.store.Get("rotation", &gotState)
-			gotState.CurrentAssigned = time.Time{}
+			r.store.Get(context.Background(), "rotation", &gotState)
+			if len(gotState.Users) != len(tt.wantState.Users) {
+				t.Fatalf("rotator.AddUser() users = %d, want %d", len(gotState.Users), len(tt.wantState.Users))
+			}
+
+			for i := range gotState.Users {
+				if gotState.Users[i].LastAssigned.IsZero() != tt.wantState.Users[i].LastAssigned.IsZero() {
+					t.Errorf("rotator.AddUser() time at %d = %v, wantTime %v", i, gotState.Users[i].LastAssigned.IsZero(), tt.wantState.Users[i].LastAssigned.IsZero())
+				}
+				gotState.Users[i].LastAssigned = time.Time{}
+				tt.wantState.Users[i].LastAssigned = time.Time{}
+			}
+
 			if !reflect.DeepEqual(tt.wantState, gotState) {
 				t.Errorf("rotator.AddUser() state = %v, wantState %v", gotState, tt.wantState)
 			}
@@ -357,7 +297,6 @@ func Test_rotator_RemoveUser(t *testing.T) {
 	}
 	tests := []struct {
 		name      string
-		s         discordRotatorSession
 		r         rotation
 		args      args
 		wantState rotation
@@ -367,35 +306,80 @@ func Test_rotator_RemoveUser(t *testing.T) {
 			name: "basic",
 			r: rotation{
 				Current: 0,
-				Users:   []string{"123", "456"},
+				Users: []rotationUser{
+					{ID: "123", LastAssigned: time.Now()},
+					{ID: "456"},
+				},
 			},
 			args: args{id: "123"},
 			wantState: rotation{
 				Current: 0,
-				Users:   []string{"456"},
+				Users: []rotationUser{
+					{ID: "456", LastAssigned: time.Now()},
+				},
+			},
+		},
+		{
+			name: "remove-last-user",
+			r: rotation{
+				Current: 1,
+				Users: []rotationUser{
+					{ID: "123"},
+					{ID: "456", LastAssigned: time.Now()},
+				},
+			},
+			args: args{id: "456"},
+			wantState: rotation{
+				Current: 0,
+				Users: []rotationUser{
+					{ID: "123", LastAssigned: time.Now()},
+				},
+			},
+		},
+		{
+			name: "remove-inactive-user",
+			r: rotation{
+				Current: 0,
+				Users: []rotationUser{
+					{ID: "123", LastAssigned: time.Now()},
+					{ID: "456"},
+				},
+			},
+			args: args{id: "456"},
+			wantState: rotation{
+				Current: 0,
+				Users: []rotationUser{
+					{ID: "123", LastAssigned: time.Now()},
+				},
 			},
 		},
 		{
 			name: "remove-non-user",
 			r: rotation{
 				Current: 0,
-				Users:   []string{"123", "456"},
+				Users: []rotationUser{
+					{ID: "123"},
+					{ID: "456"},
+				},
 			},
 			args: args{id: "789"},
 			wantState: rotation{
 				Current: 0,
-				Users:   []string{"123", "456"},
+				Users: []rotationUser{
+					{ID: "123"},
+					{ID: "456"},
+				},
 			},
 		},
 		{
 			name: "empty",
 			r: rotation{
 				Current: 0,
-				Users:   []string{},
+				Users:   []rotationUser{},
 			},
 			wantState: rotation{
 				Current: 0,
-				Users:   []string{},
+				Users:   []rotationUser{},
 			},
 			args: args{id: "123"},
 		},
@@ -403,18 +387,28 @@ func Test_rotator_RemoveUser(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			r := &rotator{
-				s:     tt.s,
 				store: state.NewMemory(),
 			}
-			r.store.Set("rotation", tt.r)
+			r.store.Set(context.Background(), "rotation", tt.r)
 
-			if err := r.RemoveUser(tt.args.id); (err != nil) != tt.wantErr {
+			if err := r.RemoveUser(context.Background(), tt.args.id); (err != nil) != tt.wantErr {
 				t.Errorf("rotator.RemoveUser() error = %v, wantErr %v", err, tt.wantErr)
 			}
 
 			gotState := rotation{}
-			r.store.Get("rotation", &gotState)
-			gotState.CurrentAssigned = time.Time{}
+			r.store.Get(context.Background(), "rotation", &gotState)
+			if len(gotState.Users) != len(tt.wantState.Users) {
+				t.Fatalf("rotator.RemoveUser() users = %d, want %d", len(gotState.Users), len(tt.wantState.Users))
+			}
+
+			for i := range gotState.Users {
+				if gotState.Users[i].LastAssigned.IsZero() != tt.wantState.Users[i].LastAssigned.IsZero() {
+					t.Errorf("rotator.RemoveUser() time at %d = %v, wantTime %v", i, gotState.Users[i].LastAssigned.IsZero(), tt.wantState.Users[i].LastAssigned.IsZero())
+				}
+				gotState.Users[i].LastAssigned = time.Time{}
+				tt.wantState.Users[i].LastAssigned = time.Time{}
+			}
+
 			if !reflect.DeepEqual(tt.wantState, gotState) {
 				t.Errorf("rotator.RemoveUser() state = %v, wantState %v", gotState, tt.wantState)
 			}

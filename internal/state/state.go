@@ -1,6 +1,8 @@
 package state
 
+import "context"
+
 type Backend interface {
-	Set(key string, value interface{}) (err error)
-	Get(key string, value interface{}) error
+	Set(ctx context.Context, key string, value interface{}) (err error)
+	Get(ctx context.Context, key string, value interface{}) error
 }

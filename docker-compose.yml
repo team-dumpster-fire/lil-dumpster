@@ -1,8 +1,12 @@
-version: "3.8"
+# Use this file with "docker compose up" to launch a redis instance for testing persistance against.
+#
+# To enable in the bot, run it with:
+#  REDIS_HOST=$(docker compose port redis 6379) go run main.go
+#
 
 services:
-    app:
-        image: ghcr.io/team-dumpster-fire/lil-dumpster:latest
-        build: .
-        environment:
-            DISCORD_TOKEN: ${DISCORD_TOKEN}
+  redis:
+    image: redis:6
+    ports:
+      - target: 6379
+        host_ip: 127.0.0.1
