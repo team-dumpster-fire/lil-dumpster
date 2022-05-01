@@ -41,9 +41,20 @@ func init() {
 				Command: &discordgo.ApplicationCommand{
 					Name:        "rotator",
 					Description: "Display the current user in the channel rotation",
-					Options:     []*discordgo.ApplicationCommandOption{},
+					Options: []*discordgo.ApplicationCommandOption{
+						{
+							Type:        discordgo.ApplicationCommandOptionBoolean,
+							Name:        "announce",
+							Description: "Post the response publicly for all to see",
+						},
+					},
 				},
 				Handler: func(s *discordgo.Session, i *discordgo.InteractionCreate) {
+					var announce bool
+					if len(i.ApplicationCommandData().Options) > 0 {
+						announce = i.ApplicationCommandData().Options[0].BoolValue()
+					}
+
 					rot := newRotator(i.ChannelID, store)
 
 					currentUser, err := rot.Current(context.TODO())
@@ -60,11 +71,15 @@ func init() {
 						return
 					}
 
+					var flags uint64
+					if !announce {
+						flags = 1 << 6 // Ephemeral, private
+					}
 					err = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 						Type: discordgo.InteractionResponseChannelMessageWithSource,
 						Data: &discordgo.InteractionResponseData{
 							Content: fmt.Sprintf("%s\n\n%s is the current user as of <t:%d:R>", list, currentUser.resolve(s).Mention(), currentUser.LastAssigned.Unix()),
-							Flags:   1 << 6, // Ephemeral, private
+							Flags:   flags,
 						},
 					})
 					if err != nil {
