@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"log"
+	"math/rand"
 	"regexp"
 	"strconv"
 	"strings"
@@ -19,7 +20,7 @@ type poll struct {
 
 type pollChoice struct {
 	choice   string
-	count    int64
+	count    int
 	mentions []string
 }
 
@@ -55,6 +56,38 @@ func init() {
 				},
 				MessageComponents: func() map[string]func(*discordgo.Session, *discordgo.InteractionCreate) {
 					ret := map[string]func(*discordgo.Session, *discordgo.InteractionCreate){}
+
+					// first the tiebreaker button
+					ret["pollButtonTiebreaker"] = func(s *discordgo.Session, interaction *discordgo.InteractionCreate) {
+						log.Println("Button clicked: ", interaction.Message.ID, interaction.Member.User.Username)
+						poll := parsePoll(interaction.Message.Content)
+
+						ties, ok := poll.hasTie()
+						if !ok {
+							return
+						}
+						chosen := rand.Intn(len(ties))
+						log.Printf("chose %d as a tiebreaker", chosen)
+
+						poll.choices[chosen].count++
+						poll.choices[chosen].mentions = append(poll.choices[chosen].mentions, s.State.User.Mention())
+
+						// Build the buttons
+						buttons := poll.buttons()
+
+						s.InteractionRespond(interaction.Interaction, &discordgo.InteractionResponse{
+							Type: discordgo.InteractionResponseUpdateMessage,
+							Data: &discordgo.InteractionResponseData{
+								Content: poll.serialize(),
+								Flags:   uint64(interaction.Message.Flags),
+								Components: []discordgo.MessageComponent{
+									discordgo.ActionsRow{Components: buttons},
+								},
+							},
+						})
+					}
+
+					// next the voting buttons
 					for i := 0; i < 20; i++ {
 						choiceN := i
 						customID := fmt.Sprintf("pollButton%d", i)
@@ -65,35 +98,47 @@ func init() {
 							log.Println("Button clicked: ", interaction.Message.ID, interaction.Member.User.Username)
 							poll := parsePoll(interaction.Message.Content)
 
-							// Build the new user list, skipping the actioning user
+							// Build the new user list
+							var alreadyVoted bool
 							newUsers := []string{}
 							for _, user := range poll.choices[choiceN].mentions {
-								if user == interaction.Member.Mention() {
+								// Skip the bot which might have a tiebreaker vote
+								if user == s.State.User.Mention() {
 									continue
 								}
+
+								// If the user already voted, they're un-voting
+								if user == interaction.Member.Mention() {
+									alreadyVoted = true
+									continue
+								}
+
 								newUsers = append(newUsers, user)
 							}
 
-							if len(poll.choices[choiceN].mentions) != len(newUsers) {
-								// If the user voted already (the list is N-1), decrement the count
-								poll.choices[choiceN].count--
-							} else {
-								// If the user hasn't voted (N), increment the count and add the user
-								poll.choices[choiceN].count++
+							// If the user is voting for the first time, add them
+							if !alreadyVoted {
 								newUsers = append(newUsers, interaction.Member.Mention())
 							}
+
+							poll.choices[choiceN].count = len(newUsers)
 							poll.choices[choiceN].mentions = newUsers
 
 							// Log the new poll string
 							log.Println("New poll: ", poll)
 
+							// Build the buttons
+							buttons := poll.buttons()
+
 							// And update the string on the server
 							s.InteractionRespond(interaction.Interaction, &discordgo.InteractionResponse{
 								Type: discordgo.InteractionResponseUpdateMessage,
 								Data: &discordgo.InteractionResponseData{
-									Content:    poll.serialize(),
-									Flags:      uint64(interaction.Message.Flags),
-									Components: interaction.Message.Components,
+									Content: poll.serialize(),
+									Flags:   uint64(interaction.Message.Flags),
+									Components: []discordgo.MessageComponent{
+										discordgo.ActionsRow{Components: buttons},
+									},
 								},
 							})
 						}
@@ -102,6 +147,7 @@ func init() {
 					return ret
 				}(),
 				Handler: func(s *discordgo.Session, i *discordgo.InteractionCreate) {
+					// Build the poll
 					poll := poll{prompt: "Poll:"}
 					var choicesString string
 					var flags uint64
@@ -118,9 +164,6 @@ func init() {
 						}
 					}
 
-					// Build the buttons
-					buttons := []discordgo.MessageComponent{}
-					index := 0
 					for _, choice := range strings.Split(choicesString, ",") {
 						choice = strings.TrimSpace(choice)
 						if len(choice) == 0 {
@@ -132,13 +175,10 @@ func init() {
 							count:    0,
 							mentions: []string{},
 						})
-
-						buttons = append(buttons, discordgo.Button{
-							CustomID: fmt.Sprintf("pollButton%d", index),
-							Label:    fmt.Sprintf("%d", index+1),
-						})
-						index++
 					}
+
+					// Build the buttons
+					buttons := poll.buttons()
 
 					// Send the poll!
 					err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
@@ -160,6 +200,25 @@ func init() {
 			},
 		}
 	})
+}
+
+func (p *poll) buttons() []discordgo.MessageComponent {
+	buttons := []discordgo.MessageComponent{}
+	for i := range p.choices {
+		buttons = append(buttons, discordgo.Button{
+			CustomID: fmt.Sprintf("pollButton%d", i),
+			Label:    fmt.Sprintf("%d", i+1),
+		})
+	}
+
+	if _, tie := p.hasTie(); tie {
+		buttons = append(buttons, discordgo.Button{
+			CustomID: "pollButtonTiebreaker",
+			Label:    "Tiebreaker!",
+		})
+	}
+
+	return buttons
 }
 
 func parsePoll(msg string) poll {
@@ -198,7 +257,7 @@ func parsePoll(msg string) poll {
 		if err != nil {
 			log.Println("Could not parse count: ", lineParts[2])
 		}
-		c.count = count
+		c.count = int(count)
 
 		ret.choices = append(ret.choices, c)
 	}
@@ -227,4 +286,22 @@ func (p *poll) serialize() string {
 	}
 
 	return msg.String()
+}
+
+func (p *poll) hasTie() ([]int, bool) {
+	var maxCount int
+	maxIndexes := []int{}
+
+	for i, choice := range p.choices {
+		if choice.count == 0 {
+			continue
+		} else if choice.count > maxCount {
+			maxCount = choice.count
+			maxIndexes = []int{i}
+		} else if choice.count == maxCount {
+			maxIndexes = append(maxIndexes, i)
+		}
+	}
+
+	return maxIndexes, len(maxIndexes) > 1
 }
