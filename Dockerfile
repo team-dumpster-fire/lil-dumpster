@@ -12,7 +12,7 @@ ENV CGO_ENABLED=0
 RUN go build -o main
 
 # ---
-FROM alpine:3.15 AS dist
+FROM alpine:3.16.0 AS dist
 
 # Dependencies
 RUN apk add --no-cache ca-certificates
