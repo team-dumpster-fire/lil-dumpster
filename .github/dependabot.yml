@@ -4,13 +4,19 @@ updates:
     directory: "/"
     schedule:
       interval: "monthly"
+    reviewers:
+      - taiidani
 
   - package-ecosystem: "gomod"
     directory: "/"
     schedule:
       interval: "monthly"
+    reviewers:
+      - taiidani
 
   - package-ecosystem: "docker"
     directory: "/"
     schedule:
       interval: "monthly"
+    reviewers:
+      - taiidani
