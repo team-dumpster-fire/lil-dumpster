@@ -4,7 +4,7 @@ FROM alpine:3.16
 RUN apk add --no-cache ca-certificates
 
 # Add pre-built application
-COPY app /app
+COPY lil-dumpster /app
 ENTRYPOINT [ "/app" ]
 
 LABEL org.opencontainers.image.source https://github.com/team-dumpster-fire/lil-dumpster
