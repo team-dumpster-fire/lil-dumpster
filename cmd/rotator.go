@@ -71,7 +71,7 @@ func init() {
 						return
 					}
 
-					var flags uint64
+					var flags discordgo.MessageFlags
 					if !announce {
 						flags = 1 << 6 // Ephemeral, private
 					}

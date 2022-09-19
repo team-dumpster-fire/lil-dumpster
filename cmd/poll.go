@@ -79,7 +79,7 @@ func init() {
 							Type: discordgo.InteractionResponseUpdateMessage,
 							Data: &discordgo.InteractionResponseData{
 								Content: poll.serialize(),
-								Flags:   uint64(interaction.Message.Flags),
+								Flags:   interaction.Message.Flags,
 								Components: []discordgo.MessageComponent{
 									discordgo.ActionsRow{Components: buttons},
 								},
@@ -135,7 +135,7 @@ func init() {
 								Type: discordgo.InteractionResponseUpdateMessage,
 								Data: &discordgo.InteractionResponseData{
 									Content: poll.serialize(),
-									Flags:   uint64(interaction.Message.Flags),
+									Flags:   interaction.Message.Flags,
 									Components: []discordgo.MessageComponent{
 										discordgo.ActionsRow{Components: buttons},
 									},
@@ -150,7 +150,7 @@ func init() {
 					// Build the poll
 					poll := poll{prompt: "Poll:"}
 					var choicesString string
-					var flags uint64
+					var flags discordgo.MessageFlags
 					for _, opt := range i.ApplicationCommandData().Options {
 						switch opt.Name {
 						case "choices":
