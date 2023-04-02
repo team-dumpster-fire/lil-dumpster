@@ -3,7 +3,7 @@ module github.com/team-dumpster-fire/lil-dumpster
 go 1.20
 
 require (
-	github.com/bwmarrin/discordgo v0.26.1
+	github.com/bwmarrin/discordgo v0.27.1
 	github.com/go-redis/redis/v8 v8.11.5
 )
 

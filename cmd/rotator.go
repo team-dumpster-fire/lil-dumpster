@@ -30,7 +30,7 @@ type (
 	}
 
 	rotatorSession interface {
-		User(userID string) (st *discordgo.User, err error)
+		User(userID string, opt ...discordgo.RequestOption) (st *discordgo.User, err error)
 	}
 )
 

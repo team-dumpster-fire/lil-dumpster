@@ -86,7 +86,7 @@ func Test_rotator_ListFormatted(t *testing.T) {
 				},
 			},
 			s: &mockDiscordSession{
-				mockUser: func(userID string) (st *discordgo.User, err error) {
+				mockUser: func(userID string, opt ...discordgo.RequestOption) (st *discordgo.User, err error) {
 					if userID == "123" || userID == "456" {
 						return &discordgo.User{ID: userID, Username: userID}, nil
 					}
